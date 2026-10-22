@@ -50,7 +50,22 @@ export interface LinkOutcome {
   ok: boolean;
   /** Present only when ok is false; already written for the user. */
   message?: string;
+  /** Who the account is now linked with, when ok is true and the name is known. */
+  partnerName?: string;
 }
+
+/** Whether the person who was shown this account's code has used it yet. */
+export interface PartnerCheck {
+  linked: boolean;
+  partnerName?: string;
+}
+
+/**
+ * Reloads everything for the signed-in account. A new link changes the
+ * household balance, the purchases list and the partner's budgets, and only
+ * the full load knows how to read all three.
+ */
+type ReloadUserData = (userId: string, scope: AccountDataScope) => Promise<void>;
 
 /** Shape returned by link_partner_by_code. */
 interface LinkedPartner {
@@ -59,12 +74,32 @@ interface LinkedPartner {
   partner_email: string | null;
 }
 
-export const useHouseholdLinking = ({
-  appState,
-  setAppState,
-  setDbError,
-  accountScopeRef,
-}: UseUserDataParams) => {
+const CODE_DID_NOT_WORK =
+  'That code didn’t work, so you aren’t linked. Check it with your partner, or ask them '
+  + 'for a fresh one: each code works once, for 30 minutes.';
+
+/** What a failed link attempt tells the person, in the app's own words. */
+function linkFailureMessage(failureKind: string | undefined, detail?: string): string {
+  if (failureKind === 'rejected' && /invalid or expired/i.test(detail ?? '')) return CODE_DID_NOT_WORK;
+  if (failureKind === 'rejected') return 'Covault couldn’t link you. Nothing changed. Please try again.';
+  return 'Covault couldn’t reach the server, so you aren’t linked yet. '
+    + 'Check your connection and try again.';
+}
+
+export const useHouseholdLinking = (
+  { appState, setAppState, setDbError, accountScopeRef }: UseUserDataParams,
+  reloadUserData?: ReloadUserData,
+) => {
+
+  // Best-effort and never awaited by the caller: the link itself has already
+  // succeeded, and a failed reload only means the partner's purchases arrive
+  // on the next load instead of now.
+  const reloadAfterLink = useCallback((userId: string, scope: AccountDataScope | null) => {
+    if (!reloadUserData || !scope) return;
+    reloadUserData(userId, scope).catch((err: unknown) => {
+      log.error('[householdLink] reload after link failed', err);
+    });
+  }, [reloadUserData]);
 
   // Generate a link code for household linking (stored in settings row)
   const handleGenerateLinkCode = useCallback(async (): Promise<string | null> => {
@@ -151,17 +186,17 @@ export const useHouseholdLinking = ({
         });
         if (!isLinkScopeCurrent(accountScopeRef, scope, userId)) return { ok: false };
 
+        // Both screens that link show the reason under the code box, so no
+        // app-wide error is raised as well: a mistyped code used to produce
+        // the database's own wording there AND a red banner saying Covault
+        // "couldn't confirm whether household sharing changed", which it had.
         if (!result.ok) {
-          const message = result.message ?? 'Could not link your partner. Please try again.';
-          setDbError(message);
-          return { ok: false, message };
+          return { ok: false, message: linkFailureMessage(result.failureKind, result.message) };
         }
 
         const linked = result.data?.[0];
         if (!linked) {
-          const message = 'That code is not valid. Ask your partner to show you a fresh one.';
-          setDbError(message);
-          return { ok: false, message };
+          return { ok: false, message: CODE_DID_NOT_WORK };
         }
 
         // budgeting_solo isn't part of the handshake — it's a per-user display
@@ -192,16 +227,48 @@ export const useHouseholdLinking = ({
         });
 
         log.debug('[joinWithCode] Successfully linked household');
-        return { ok: true };
+        // Until now this phone knew only the partner's name. Their purchases,
+        // income and budgets used to wait for the next app start.
+        reloadAfterLink(userId, scope);
+        return { ok: true, partnerName: linked.partner_name || undefined };
       } catch (err: any) {
         if (!userId || !isLinkScopeCurrent(accountScopeRef, scope, userId)) return { ok: false };
-        const message = `Join with code exception: ${err?.message || err}`;
-        setDbError(message);
-        return { ok: false, message };
+        log.error('[joinWithCode]', err?.message || err);
+        return { ok: false, message: linkFailureMessage('unknown') };
       }
     },
-    [accountScopeRef, appState.user, setAppState, setDbError],
+    [accountScopeRef, appState.user, reloadAfterLink, setAppState, setDbError],
   );
+
+  /**
+   * Asked repeatedly while this phone is showing its code.
+   *
+   * The code is used on the OTHER phone, and nothing tells this one. Without
+   * this, the person who showed the code was left looking at it after their
+   * partner had joined, with no sign that anything had happened until they
+   * restarted the app. A single row read; the full reload only runs once.
+   */
+  const handleCheckForPartner = useCallback(async (): Promise<PartnerCheck> => {
+    const userId = appState.user?.id;
+    const scope = userId && accountScopeRef
+      ? captureAccountDataScope(accountScopeRef, userId)
+      : null;
+    if (!userId || !isLinkScopeCurrent(accountScopeRef, scope, userId)) return { linked: false };
+    try {
+      const res = await restFetch(
+        `/settings?select=partner_id,partner_name&user_id=eq.${userId}&limit=1`,
+        { cache: 'no-store' },
+      );
+      if (!res.ok || !isLinkScopeCurrent(accountScopeRef, scope, userId)) return { linked: false };
+      const rows = await res.json();
+      const row = Array.isArray(rows) ? rows[0] : null;
+      if (!row?.partner_id) return { linked: false };
+      reloadAfterLink(userId, scope);
+      return { linked: true, partnerName: row.partner_name || undefined };
+    } catch {
+      return { linked: false };
+    }
+  }, [accountScopeRef, appState.user, reloadAfterLink]);
 
 
   // Disconnect household (clear partner fields in both users' settings)
@@ -253,6 +320,7 @@ export const useHouseholdLinking = ({
   return {
     handleGenerateLinkCode,
     handleJoinWithCode,
+    handleCheckForPartner,
     handleUnlinkPartner,
   };
 };

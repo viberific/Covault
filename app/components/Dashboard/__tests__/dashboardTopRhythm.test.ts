@@ -28,7 +28,7 @@ describe('the three breaks down the home screen are equal', () => {
   it('balance to search is 12px, in both states of the search control', () => {
     // The open field and the closed button both sit in the same slot, so a
     // change to one and not the other makes the page jump on tap.
-    expect(balance).toContain('className="relative mt-3 w-2/3 lg:w-1/3 z-10 animate-nest"');
+    expect(balance).toContain('className="relative mt-3 w-2/3 lg:w-1/3 z-10"');
     expect(balance).toContain('className="mt-3 w-2/3 lg:w-1/3 inline-flex');
     expect(balance).not.toContain('mt-2 w-2/3');
   });

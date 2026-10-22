@@ -30,8 +30,9 @@ export const useUserData = ({
   const {
     handleGenerateLinkCode,
     handleJoinWithCode,
+    handleCheckForPartner,
     handleUnlinkPartner,
-  } = useHouseholdLinking({ appState, setAppState, setDbError, accountScopeRef });
+  } = useHouseholdLinking({ appState, setAppState, setDbError, accountScopeRef }, loadUserData);
 
   const {
     saveBudgetLimit,
@@ -60,6 +61,7 @@ export const useUserData = ({
     handleUnlinkPartner,
     handleGenerateLinkCode,
     handleJoinWithCode,
+    handleCheckForPartner,
     handleClearApprovedTransactions,
     saveBudgetLimit,
     saveUserIncome,

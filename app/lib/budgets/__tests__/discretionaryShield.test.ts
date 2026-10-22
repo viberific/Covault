@@ -174,7 +174,7 @@ describe('the wiring between the toggle and the vial', () => {
     // `currentMonthBudgetTransactions` here would shield September's overspend
     // while the user was reading March.
     const call = dashboard
-      .slice(dashboard.indexOf('computeShieldBreakdown(state.budgets'))
+      .slice(dashboard.indexOf('computeShieldBreakdown(viewBudgetList'))
       .slice(0, 200);
     expect(call).toContain('viewMonthBudgetTransactions');
   });

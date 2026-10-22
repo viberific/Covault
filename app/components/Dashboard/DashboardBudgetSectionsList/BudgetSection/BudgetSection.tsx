@@ -68,6 +68,8 @@ interface BudgetSectionProps {
   onTransactionTap: (tx: Transaction) => void;
   currentUserName: string;
   isSharedView: boolean;
+  /** Whose purchases the open card lists. Defaults by sharing alone. */
+  activityLabel?: string;
   allBudgets?: BudgetCategory[];
   /**
    * False while this vial is showing a month other than the current one, where
@@ -98,6 +100,7 @@ const BudgetSection: React.FC<BudgetSectionProps> = ({
   onTransactionTap,
   currentUserName,
   isSharedView,
+  activityLabel,
   allBudgets,
   isCurrentMonth = true,
   useCompactCollapsedStyles = false,
@@ -591,7 +594,7 @@ const BudgetSection: React.FC<BudgetSectionProps> = ({
         <div className="pt-1 pb-6 space-y-4">
           <div className="flex items-center justify-between px-2">
             <span className="text-[11px] font-semibold tracking-wide motion-safe:transition-colors motion-safe:duration-[320ms] text-slate-400 dark:text-slate-500">
-              {isSharedView ? 'Our Activity' : 'Activity'}
+              {activityLabel ?? (isSharedView ? 'Our Activity' : 'Activity')}
             </span>
 
             {/* Jump to now. Wears the category's own colour, like the icon

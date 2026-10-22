@@ -147,11 +147,11 @@ const FAQ_ITEMS: FAQItem[] = [
   },
   {
     question: "How do I link to a partner?",
-    answer: "Open Vault Settings via the gear icon and scroll to 'Vault Sharing.' Tap 'Generate Code' to create a link code and share it with your partner, or enter a code they've shared with you. They need a Covault account of their own first. Once linked you each see the other's entries and budgets; each of you still edits only your own."
+    answer: "Open Vault Settings via the gear icon and scroll to 'Vault Sharing.' One of you taps 'Show my code' and reads it out; the other types it into 'Enter your partner's code' and taps 'Link with this code'. The code works once, for 30 minutes, and the first phone updates by itself once it has been used. They need a Covault account of their own first. Once linked you each see the other's entries and budgets; each of you still edits only your own."
   },
   {
     question: "How do I disconnect from a partner?",
-    answer: "Open Vault Settings and scroll to 'Vault Sharing.' Tap 'Disconnect' to unlink your partner. Your data stays safe — you'll just return to solo budgeting."
+    answer: "Open Vault Settings and scroll to 'Vault Sharing.' Tap 'Disconnect Partner' to unlink your partner. Your data stays safe — you'll just return to solo budgeting."
   },
   {
     question: "How do I report a problem?",

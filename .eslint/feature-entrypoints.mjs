@@ -16,6 +16,7 @@ export const appPublicEntries = new Set([
   'app/components/common/ErrorBoundary',
   'app/components/common/FullScreenLoader',
   'app/components/common/NoticeModal',
+  'app/components/common/OwnerDisc',
   'app/components/common/PageShell',
   'app/components/common/ParsingCard',
   'app/components/common/Portal',
@@ -39,6 +40,7 @@ export const appPublicEntries = new Set([
   'app/components/transactions',
   'app/components/transactions/TransactionActionModal',
   'app/components/transactions/TransactionItem',
+  'app/components/transactions/householdPeople',
   'app/components/updates',
 ]);
 
