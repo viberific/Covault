@@ -179,6 +179,7 @@ const App: React.FC = () => {
     handleDeleteTransaction,
     handleGenerateLinkCode,
     handleJoinWithCode,
+    handleCheckForPartner,
     handleUnlinkPartner,
     saveBudgetLimit,
     saveUserIncome,
@@ -577,6 +578,7 @@ const App: React.FC = () => {
           onComplete={handleOnboardingComplete}
           onGenerateLinkCode={handleGenerateLinkCode}
           onJoinWithCode={handleJoinWithCode}
+          onCheckForPartner={handleCheckForPartner}
           setup={onboardingSetup}
         />
       )}
@@ -605,6 +607,7 @@ const App: React.FC = () => {
           saveDashboardSetting={saveDashboardSetting}
           onGenerateLinkCode={handleGenerateLinkCode}
           onJoinWithCode={handleJoinWithCode}
+          onCheckForPartner={handleCheckForPartner}
           onUnlinkPartner={handleUnlinkPartner}
           onToast={setToast}
           onRefreshNotifications={refreshNotifications}

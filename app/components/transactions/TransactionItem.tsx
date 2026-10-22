@@ -3,6 +3,8 @@ import { Transaction, BudgetCategory } from '../../types';
 import { parseLocalDate } from '../../lib/time/dateUtils';
 
 import { getBudgetIcon } from '../common/getBudgetIcon';
+import OwnerDisc from '../common/OwnerDisc';
+import { useHouseholdPeople, initialOf } from './householdPeople';
 
 // Hoisted: `Date.prototype.toLocaleDateString` builds a fresh
 // Intl.DateTimeFormat on every call, which is one of the more expensive
@@ -48,7 +50,18 @@ const TransactionItem: React.FC<TransactionItemProps> = ({
     return transactionDate > new Date();
   }, [transactionDate, transaction.is_projected]);
 
-  const isOtherUser = isSharedView && transaction.userName !== currentUserName;
+  // Ownership comes from the row's user id. A row with no owner is the
+  // signed-in person's, as everywhere else in the household code.
+  const people = useHouseholdPeople();
+  const isOtherUser = isSharedView && (people
+    ? !!transaction.user_id && transaction.user_id !== people.myUserId
+    : transaction.userName !== currentUserName);
+  const ownerLabel = isOtherUser
+    ? people?.partnerLabel || transaction.userName?.split(' ', 1)[0] || 'Partner'
+    : 'You';
+  const ownerInitial = isOtherUser
+    ? people?.partnerInitial ?? initialOf(ownerLabel)
+    : people?.myInitial ?? initialOf(currentUserName);
   const txAmount = typeof transaction.amount === 'number' ? transaction.amount : Number(transaction.amount) || 0;
   const isRefund = txAmount < 0;
 
@@ -88,9 +101,21 @@ const TransactionItem: React.FC<TransactionItemProps> = ({
         //
         // Guarded by Test/Tests/Regressions/budgetExpandHotPath.test.ts.
         className="relative z-10 p-4 rounded-[2rem] border shadow-sm ring-1 ring-inset ring-white/10 dark:ring-white/[0.03] bg-white/90 dark:bg-slate-900/90 border-slate-200/40 dark:border-slate-700/40 cursor-pointer hover:bg-white/95 dark:hover:bg-slate-900/95 active:scale-[0.98] transition-[background-color,transform,scale] duration-200 w-full text-left"
-        aria-label={`Transaction: ${transaction.vendor}, ${Math.abs(txAmount).toFixed(2)} dollars on ${FULL_DATE_FMT.format(transactionDate)}`}
+        aria-label={`Transaction: ${transaction.vendor}, ${Math.abs(txAmount).toFixed(2)} dollars on ${FULL_DATE_FMT.format(transactionDate)}${isSharedView ? `, ${isOtherUser ? `${ownerLabel}'s` : 'yours'}` : ''}`}
       >
         <div className="flex items-center justify-between">
+          {/* Whose purchase: the same round symbol as the header button, at the
+              front of the row. The name is not repeated in the title. */}
+          {isSharedView && (
+            <OwnerDisc
+              owner={isOtherUser ? 'them' : 'you'}
+              data-disc={isOtherUser ? 'them' : 'you'}
+              initial={ownerInitial}
+              size="md"
+              className="shrink-0 mr-3"
+            />
+          )}
+
           {/* Budget icon on the left for search results */}
           {showBudgetIcon && budget && (
             <div className="flex-shrink-0 mr-3 p-2 rounded-xl bg-slate-100/80 dark:bg-slate-800/60 text-slate-400 dark:text-slate-500">
@@ -109,18 +134,6 @@ const TransactionItem: React.FC<TransactionItemProps> = ({
               >
                 {transaction.vendor}
               </span>
-              {isSharedView && (
-                <span
-                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full tracking-wide transition-colors duration-700 ${
-                    isOtherUser
-                      ? 'bg-emerald-950 text-emerald-400'
-                      : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                  }`}
-                >
-                  {transaction.userName?.split(' ', 1)[0]}
-                </span>
-              )}
-
               <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 tracking-tight">
                 {SHORT_DATE_FMT.format(transactionDate)}
               </span>

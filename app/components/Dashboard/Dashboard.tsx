@@ -37,9 +37,16 @@ import { callRpc } from '../../lib/api/apiHelpers';
 import {
   householdIncome,
   householdBudgets,
-  spendingAgainstMyBudgets,
+  defaultHouseholdView,
+  transactionsForView,
+  budgetsForView,
+  incomeForView,
+  type HouseholdView,
   type PartnerSummary,
 } from '../../lib/budgets/householdSharing';
+import HouseholdViewButton from './HouseholdViewButton';
+import { useHouseholdViewChoice } from '../../hooks/useHouseholdViewChoice';
+import { HouseholdPeopleContext, partnerLabelFrom, initialOf } from '../transactions/householdPeople';
 import { useCurrentDay } from '../../hooks/useCurrentDay';
 import { useBackHandler } from '../../hooks/useBackHandler';
 import { useMonthSelection } from './useMonthSelection';
@@ -91,7 +98,9 @@ interface Props {
   /** Mints a fresh link code on this account. Linking is code-only — see
    *  VaultSharingSection for why an email route no longer exists. */
   onGenerateLinkCode: () => Promise<string | null>;
-  onJoinWithCode: (code: string) => Promise<{ ok: boolean; message?: string }>;
+  onJoinWithCode: (code: string) => Promise<{ ok: boolean; message?: string; partnerName?: string }>;
+  /** Whether the partner has used this phone's code yet. */
+  onCheckForPartner?: () => Promise<{ linked: boolean; partnerName?: string }>;
   onUnlinkPartner: () => Promise<void>;
   onRefreshNotifications?: () => Promise<void>;
   onReloadTransactions?: (userId: string) => Promise<void>;
@@ -123,6 +132,7 @@ const Dashboard: React.FC<Props> = ({
   saveDashboardSetting,
   onGenerateLinkCode,
   onJoinWithCode,
+  onCheckForPartner,
   onUnlinkPartner,
   onRefreshNotifications,
   onReloadTransactions,
@@ -320,6 +330,45 @@ const Dashboard: React.FC<Props> = ({
     [state.budgets, state.partnerBudgets, budgetMode],
   );
 
+  // ── Me / Us / Them ──
+  //
+  // Whose money the chart, the vials and their lists show. Display only: the
+  // widget and the over-budget alerts keep following `budgetMode` above, and
+  // the balance at the top stays the household's whichever is picked.
+  //
+  // Offered only when the partner's purchases are actually on this phone. At
+  // a sharing level below "every purchase" their rows are refused, so "Them"
+  // would be an empty screen and "Us" would be only you; the dashboard then
+  // stays on what the budget mode shows, exactly as before the switch existed.
+  const myUserId = state.user?.id || '';
+  const canChooseView = !!state.user?.partnerId && !state.partnerSummary;
+  // Opens on Us, and goes back to it whenever the app is left and returned to.
+  const [chosenView, setChosenView] = useHouseholdViewChoice();
+  const householdView: HouseholdView = canChooseView
+    ? chosenView ?? 'us'
+    : defaultHouseholdView(budgetMode);
+  const partnerLabel = partnerLabelFrom(state.user?.partnerName);
+  const myInitial = initialOf(state.user?.name);
+  const partnerInitial = initialOf(partnerLabel);
+  const householdPeople = useMemo(
+    () => ({ myUserId, partnerLabel, myInitial, partnerInitial }),
+    [myUserId, partnerLabel, myInitial, partnerInitial],
+  );
+  const viewBudgetList = useMemo(
+    () => budgetsForView(state.budgets, state.partnerBudgets ?? null, householdView),
+    [state.budgets, state.partnerBudgets, householdView],
+  );
+  const viewIncome = incomeForView(
+    state.user?.monthlyIncome || 0,
+    state.partnerIncome,
+    householdView,
+  );
+  const activityLabel = state.user?.budgetingSolo
+    ? 'Activity'
+    : householdView === 'me'
+      ? 'My Activity'
+      : householdView === 'them' ? `${partnerLabel}’s Activity` : 'Our Activity';
+
   // ── Home-screen widget ──
   // The widget runs in the native process with no Supabase session, so it can
   // only draw what we hand it. Push a fresh snapshot whenever the figures it
@@ -477,30 +526,40 @@ const Dashboard: React.FC<Props> = ({
   // and `remainingMoney`: a home-screen widget showing March because the phone
   // was left on March, or a "you are over budget" notification about a month
   // that ended, would both be wrong in a way the user could not see from here.
-  const viewMonthBudgetTransactions = useMemo(() => {
-    const forMonth = isViewingCurrentMonth
-      ? currentMonthBudgetTransactions
-      : (() => {
-          const inViewMonth = (t: Transaction) => isInMonth(t, viewMonthKey);
-          return [
-            ...normalizedTransactions.filter(inViewMonth),
-            ...projectedTransactions.filter(inViewMonth),
-          ];
-        })();
-    // Whose spending fills the vials. With separate budgets a partner's fuel
-    // does not eat yours — that is the whole point of keeping your own lines —
-    // so their rows are dropped here while staying in the balance above and in
-    // the transaction list below.
-    return spendingAgainstMyBudgets(forMonth, state.user?.id || '', budgetMode);
+  //
+  // Everyone's rows for that month. The household balance is read from this
+  // one, so a past month counts the partner's spending too; it used to read
+  // the vials' list, which in separate mode had dropped the partner's rows and
+  // overstated every browsed month's balance by what they spent.
+  const viewMonthAllTransactions = useMemo(() => {
+    if (isViewingCurrentMonth) return currentMonthBudgetTransactions;
+    const inViewMonth = (t: Transaction) => isInMonth(t, viewMonthKey);
+    return [
+      ...normalizedTransactions.filter(inViewMonth),
+      ...projectedTransactions.filter(inViewMonth),
+    ];
   }, [
     isViewingCurrentMonth,
     currentMonthBudgetTransactions,
     normalizedTransactions,
     projectedTransactions,
     viewMonthKey,
-    state.user?.id,
-    budgetMode,
   ]);
+
+  // Whose spending fills the vials: the Me / Us / Them view. Its default is
+  // what the budget mode always showed — with separate budgets a partner's
+  // fuel does not eat yours, so "me"; pooled, "us".
+  const viewMonthBudgetTransactions = useMemo(
+    () => transactionsForView(viewMonthAllTransactions, myUserId, householdView),
+    [viewMonthAllTransactions, myUserId, householdView],
+  );
+
+  // The chart draws the same person, or people, as the vials below it, against
+  // the same limits and the matching income.
+  const viewChartTransactions = useMemo(
+    () => transactionsForView(chartTransactions, myUserId, householdView),
+    [chartTransactions, myUserId, householdView],
+  );
 
   // ── The Discretionary Shield ──
   //
@@ -520,13 +579,14 @@ const Dashboard: React.FC<Props> = ({
   // disagree.
   const leisureShield = useMemo(() => {
     if (!state.settings.useLeisureAsBuffer) return NO_SHIELD;
-    return computeShieldBreakdown(state.budgets, viewMonthBudgetTransactions, {
+    // The vials' own limits, so the shield covers an overspend the vials show.
+    return computeShieldBreakdown(viewBudgetList, viewMonthBudgetTransactions, {
       hiddenCategories: state.settings.hiddenCategories,
     });
   }, [
     state.settings.useLeisureAsBuffer,
     state.settings.hiddenCategories,
-    state.budgets,
+    viewBudgetList,
     viewMonthBudgetTransactions,
   ]);
 
@@ -535,8 +595,8 @@ const Dashboard: React.FC<Props> = ({
   const viewMonthRemaining = useMemo(
     () => (isViewingCurrentMonth
       ? remainingMoney
-      : remainingForMonth(viewMonthBudgetTransactions, effectiveIncome)),
-    [isViewingCurrentMonth, remainingMoney, viewMonthBudgetTransactions, effectiveIncome],
+      : remainingForMonth(viewMonthAllTransactions, effectiveIncome)),
+    [isViewingCurrentMonth, remainingMoney, viewMonthAllTransactions, effectiveIncome],
   );
 
   // Stable key: changes only when a budget limit is added/removed/modified.
@@ -953,6 +1013,7 @@ const Dashboard: React.FC<Props> = ({
 
   const homeScreen = showParsing ? null : (
     <>
+      <HouseholdPeopleContext.Provider value={householdPeople}>
       <PageShell>
         {/* Balance + settings cog + search: combined in one section */}
         <DashboardBalanceSection
@@ -973,6 +1034,18 @@ const Dashboard: React.FC<Props> = ({
           }}
           onSearchOpenChange={setIsSearchOpen}
           onOpenSettings={() => setShowSettings(true)}
+          // Me / Us / Them, opposite the settings cog. It decides what the
+          // chart and every vial below are showing; the balance beside it is
+          // the household's either way.
+          leading={canChooseView ? (
+            <HouseholdViewButton
+              view={householdView}
+              myInitial={myInitial}
+              partnerInitial={partnerInitial}
+              partnerLabel={partnerLabel}
+              onChange={setChosenView}
+            />
+          ) : undefined}
         />
 
         {/* Capture is the reason to use this app, and it starts off. A user
@@ -1041,9 +1114,9 @@ const Dashboard: React.FC<Props> = ({
               <PremiumGate hasPremium={true}>
                 <React.Suspense fallback={<div className="h-full w-full" />}>
                 <BudgetFlowChart
-                  budgets={state.budgets}
-                  transactions={chartTransactions}
-                  monthlyIncome={state.user?.monthlyIncome || 0}
+                  budgets={viewBudgetList}
+                  transactions={viewChartTransactions}
+                  monthlyIncome={viewIncome}
                   theme={state.settings.theme}
                   highlightedBudgetId={expandedBudgets.size > 0 ? Array.from(expandedBudgets)[0] : null}
                   currentMonthKey={monthKey}
@@ -1070,11 +1143,12 @@ const Dashboard: React.FC<Props> = ({
                 broken. See EmptyMonthNote for why it is this narrow. */}
             {isViewingCurrentMonth &&
               state.settings.notificationsEnabled &&
-              viewMonthBudgetTransactions.length === 0 && <EmptyMonthNote />}
+              viewMonthAllTransactions.length === 0 && <EmptyMonthNote />}
 
             {/* Budget bars: vertical list on mobile, 2-col grid on desktop */}
             <DashboardBudgetSectionsList
-              budgets={householdBudgetList}
+              budgets={viewBudgetList}
+              activityLabel={activityLabel}
               transactions={viewMonthBudgetTransactions}
               isCurrentMonth={isViewingCurrentMonth}
               expandedBudgets={expandedBudgets}
@@ -1109,6 +1183,7 @@ const Dashboard: React.FC<Props> = ({
         />
 
       </PageShell>
+      </HouseholdPeopleContext.Provider>
 
       {showSettings && (
         <DashboardSettingsModal
@@ -1146,6 +1221,7 @@ const Dashboard: React.FC<Props> = ({
           }}
           onGenerateLinkCode={onGenerateLinkCode}
           onJoinWithCode={onJoinWithCode}
+          onCheckForPartner={onCheckForPartner}
           budgets={state.budgets}
           transactions={normalizedTransactions}
           onClose={() => {

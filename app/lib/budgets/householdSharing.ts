@@ -240,3 +240,76 @@ export function withoutPartner(state: AppState, myUserId: string): AppState {
       : state.transactions,
   };
 }
+
+/**
+ * Whose money the chart and the vials are showing: the signed-in person's,
+ * both people's, or only the partner's.
+ *
+ * A viewing choice, not a setting. It changes nothing either phone stores,
+ * and nothing that leaves this screen — the widget and the over-budget alerts
+ * keep following `BudgetMode` — and the balance at the top stays the
+ * household's whichever is picked, because it is a claim about the
+ * household's money.
+ */
+export type HouseholdView = 'me' | 'us' | 'them';
+
+/**
+ * The view a dashboard opens on: what the household's budget mode already
+ * shows. Separate lines are "mine", pooled lines are "ours", so a household
+ * that never touches the switch sees exactly what it saw before it existed.
+ */
+export function defaultHouseholdView(mode: BudgetMode): HouseholdView {
+  return mode === 'combined' ? 'us' : 'me';
+}
+
+/** One person's rows, the other's, or both. A row with no owner is the signed-in person's. */
+export function transactionsForView(
+  transactions: Transaction[],
+  myUserId: string,
+  view: HouseholdView,
+): Transaction[] {
+  if (view === 'us') return transactions;
+  const mine = (tx: Transaction) => !tx.user_id || tx.user_id === myUserId;
+  return transactions.filter(view === 'me' ? mine : (tx) => !mine(tx));
+}
+
+/**
+ * The limits the vials and the chart draw for a view.
+ *
+ * "Us" is the two sides added per category, as in the combined mode. "Them"
+ * puts the partner's limit on each of your categories by name, so the vials
+ * keep their order, colours and ids. A category the partner has no line for
+ * keeps yours, and an unreadable partner list leaves your own limits, rather
+ * than a row of empty vials that would read as "they budgeted nothing".
+ */
+export function budgetsForView(
+  own: BudgetCategory[],
+  partner: BudgetCategory[] | null | undefined,
+  view: HouseholdView,
+): BudgetCategory[] {
+  if (view === 'me') return own;
+  if (view === 'us') return householdBudgets(own, partner, 'combined');
+  if (!partner || partner.length === 0) return own;
+
+  const theirs = new Map<string, number>();
+  for (const budget of partner) {
+    const name = (budget?.name || '').trim().toLowerCase();
+    if (name) theirs.set(name, Number(budget.totalLimit) || 0);
+  }
+  return own.map((budget) => {
+    const limit = theirs.get((budget.name || '').trim().toLowerCase());
+    return limit === undefined ? budget : { ...budget, totalLimit: limit };
+  });
+}
+
+/** The income line on the chart for a view. */
+export function incomeForView(
+  ownIncome: number,
+  partnerIncome: number | null | undefined,
+  view: HouseholdView,
+): number {
+  if (view === 'me') return Number(ownIncome) || 0;
+  if (view === 'us') return householdIncome(ownIncome, partnerIncome);
+  const theirs = Number(partnerIncome);
+  return Number.isFinite(theirs) && theirs > 0 ? theirs : 0;
+}

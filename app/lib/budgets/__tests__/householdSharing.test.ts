@@ -6,6 +6,10 @@ import {
   householdSpend,
   readPartnerSummary,
   emptySummary,
+  defaultHouseholdView,
+  transactionsForView,
+  budgetsForView,
+  incomeForView,
 } from '../householdSharing';
 import type { Transaction, BudgetCategory } from '../../../types';
 
@@ -151,5 +155,38 @@ describe('reading what the database returned', () => {
     expect(readPartnerSummary([])).toBeNull();
     expect(readPartnerSummary(null)).toBeNull();
     expect(readPartnerSummary([{ share_level: 'transactions' }])).toBeNull();
+  });
+});
+
+describe('the Me / Us / Them view', () => {
+  const rows = [tx(ME, 40), tx(THEM, 15), { ...tx('', 5), user_id: undefined } as unknown as Transaction];
+  const amounts = (list: Transaction[]) => list.map((row) => row.amount);
+
+  it('opens on what the budget mode already showed', () => {
+    expect(defaultHouseholdView('separate')).toBe('me');
+    expect(defaultHouseholdView('combined')).toBe('us');
+  });
+
+  it('shows my purchases, theirs, or both — an unowned row is mine', () => {
+    expect(amounts(transactionsForView(rows, ME, 'me'))).toEqual([40, 5]);
+    expect(amounts(transactionsForView(rows, ME, 'them'))).toEqual([15]);
+    expect(amounts(transactionsForView(rows, ME, 'us'))).toEqual([40, 15, 5]);
+  });
+
+  it('draws my limits, both added, or theirs on my categories', () => {
+    const mine = [budget('Groceries', 500), budget('Fuel', 200)];
+    const theirs = [budget('groceries', 300)];
+    const limits = (list: BudgetCategory[]) => list.map((b) => [b.id, b.totalLimit]);
+    expect(limits(budgetsForView(mine, theirs, 'me'))).toEqual([['Groceries', 500], ['Fuel', 200]]);
+    expect(limits(budgetsForView(mine, theirs, 'us'))).toEqual([['Groceries', 800], ['Fuel', 200]]);
+    expect(limits(budgetsForView(mine, theirs, 'them'))).toEqual([['Groceries', 300], ['Fuel', 200]]);
+    expect(limits(budgetsForView(mine, null, 'them'))).toEqual([['Groceries', 500], ['Fuel', 200]]);
+  });
+
+  it('measures against my income, the household one, or theirs', () => {
+    expect(incomeForView(4000, 3000, 'me')).toBe(4000);
+    expect(incomeForView(4000, 3000, 'us')).toBe(7000);
+    expect(incomeForView(4000, 3000, 'them')).toBe(3000);
+    expect(incomeForView(4000, null, 'them')).toBe(0);
   });
 });

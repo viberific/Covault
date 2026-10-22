@@ -3,6 +3,7 @@ import type { DashboardUser } from '../DashboardSettingsModal';
 import SettingsCard from '../../../common/SettingsCard';
 import SectionHeader from '../../../common/SectionHeader';
 import ConfirmModal from '../../../common/ConfirmModal';
+import { useWaitForPartner } from '../../../../hooks/useWaitForPartner';
 import {
   SHARE_LEVELS,
   SHARE_LEVEL_COPY,
@@ -16,7 +17,9 @@ interface VaultSharingSectionProps {
   /** Mints a fresh code on this account and returns it to show. */
   onGenerateLinkCode: () => Promise<string | null>;
   /** Claims the code the partner read out. */
-  onJoinWithCode: (code: string) => Promise<{ ok: boolean; message?: string }>;
+  onJoinWithCode: (code: string) => Promise<{ ok: boolean; message?: string; partnerName?: string }>;
+  /** Asked while this phone shows its code: has the partner used it yet? */
+  onCheckForPartner?: () => Promise<{ linked: boolean; partnerName?: string }>;
   onDisconnectPartner: () => void;
   /** How much of your spending they see. Yours alone; see householdSharing. */
   shareLevel: ShareLevel;
@@ -42,6 +45,7 @@ const VaultSharingSection: React.FC<VaultSharingSectionProps> = ({
   user,
   onGenerateLinkCode,
   onJoinWithCode,
+  onCheckForPartner,
   onDisconnectPartner,
   shareLevel,
   onChangeShareLevel,
@@ -54,6 +58,21 @@ const VaultSharingSection: React.FC<VaultSharingSectionProps> = ({
   const [entered, setEntered] = useState('');
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
+  // Set the moment a link is made from this screen, by either route, so the
+  // linked view appears straight away and says so — before the reload that
+  // fills in the partner's details has landed.
+  const [justLinked, setJustLinked] = useState<{ name?: string } | null>(null);
+
+  // Linked is the partner's id. The email alone used to decide it, and only
+  // the moment of linking ever set the email, so after a restart both
+  // partners were shown the unlinked screen again.
+  const isLinked = !!(user?.partnerId || user?.partnerEmail || justLinked);
+  const partnerName = user?.partnerName || justLinked?.name;
+
+  useWaitForPartner(!!myCode && !isLinked, onCheckForPartner, (name) => {
+    setMyCode(null);
+    setJustLinked({ name });
+  });
 
   const handleShowCode = async () => {
     setGenerating(true);
@@ -77,6 +96,8 @@ const VaultSharingSection: React.FC<VaultSharingSectionProps> = ({
         return;
       }
       setEntered('');
+      setMyCode(null);
+      setJustLinked({ name: result.partnerName });
     } finally {
       setJoining(false);
     }
@@ -89,8 +110,17 @@ const VaultSharingSection: React.FC<VaultSharingSectionProps> = ({
         subtitle="Share one budget with your partner. One of you shows a code, the other enters it."
       />
 
-      {user?.partnerEmail ? (
+      {isLinked ? (
         <div className="space-y-4 animate-in fade-in duration-300">
+          {justLinked && (
+            <p
+              role="status"
+              className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 leading-snug px-1"
+            >
+              You’re linked{partnerName ? ` with ${partnerName}` : ''}. You now share one balance,
+              and each of you sees the other’s purchases.
+            </p>
+          )}
           <div className="flex items-center p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800">
             <div className="w-10 h-10 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl flex items-center justify-center mr-4">
               <svg
@@ -107,13 +137,18 @@ const VaultSharingSection: React.FC<VaultSharingSectionProps> = ({
                 />
               </svg>
             </div>
-            <div className="flex flex-col">
+            <div className="flex flex-col min-w-0">
               <span className="text-[11px] font-semibold text-slate-400 tracking-wide">
-                Linked With
+                Linked with
               </span>
-              <span className="text-xs font-bold text-slate-500 dark:text-slate-200 truncate max-w-[160px]">
-                {user.partnerEmail}
+              <span className="text-sm font-bold text-slate-600 dark:text-slate-100 truncate">
+                {partnerName || user?.partnerEmail || 'Your partner'}
               </span>
+              {partnerName && user?.partnerEmail && (
+                <span className="text-[11px] text-slate-400 dark:text-slate-500 truncate">
+                  {user.partnerEmail}
+                </span>
+              )}
             </div>
           </div>
           {/* ── Whose budgets ──
@@ -163,7 +198,7 @@ const VaultSharingSection: React.FC<VaultSharingSectionProps> = ({
               purchase" your rows are refused to them outright. */}
           <div className="space-y-2">
             <p className="text-[11px] font-bold tracking-wide text-slate-400 dark:text-slate-500 uppercase">
-              What {user.partnerName || 'they'} can see of your spending
+              What {partnerName || 'they'} can see of your spending
             </p>
             <div className="space-y-1.5">
               {SHARE_LEVELS.map((level, i) => {
@@ -220,12 +255,13 @@ const VaultSharingSection: React.FC<VaultSharingSectionProps> = ({
           {confirmDisconnect && (
             <ConfirmModal
               title="Disconnect your partner?"
-              message={`You and ${user.partnerEmail} would stop seeing each other's transactions and budgets straight away. Nothing is deleted — but reconnecting means one of you showing a code and the other entering it again.`}
+              message={`You and ${partnerName || user?.partnerEmail || 'your partner'} would stop seeing each other's transactions and budgets straight away. Nothing is deleted — but reconnecting means one of you showing a code and the other entering it again.`}
               confirmLabel="Disconnect"
               cancelLabel="Stay connected"
               variant="danger"
               onConfirm={() => {
                 setConfirmDisconnect(false);
+                setJustLinked(null);
                 onDisconnectPartner();
               }}
               onCancel={() => setConfirmDisconnect(false)}
@@ -245,8 +281,17 @@ const VaultSharingSection: React.FC<VaultSharingSectionProps> = ({
               </p>
               <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-snug">
                 Read this out to your partner and have them enter it on their phone.
-                It works once.
+                It works once, for 30 minutes.
               </p>
+              {onCheckForPartner && (
+                <p
+                  role="status"
+                  className="flex items-center justify-center gap-2 pt-1 text-[11px] font-semibold text-slate-400 dark:text-slate-500"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
+                  Waiting for your partner to enter it
+                </p>
+              )}
             </div>
           ) : (
             <button
@@ -264,7 +309,10 @@ const VaultSharingSection: React.FC<VaultSharingSectionProps> = ({
               inputMode="text"
               autoCapitalize="characters"
               placeholder="Enter your partner's code"
+              aria-label="Your partner's code"
+              enterKeyHint="go"
               value={entered}
+              onKeyDown={(e) => { if (e.key === 'Enter') void handleJoin(); }}
               onChange={(e) => { setEntered(e.target.value.toUpperCase()); setJoinError(null); }}
               className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl py-4 px-5 text-sm font-bold tracking-[0.15em] text-center text-slate-600 dark:text-slate-100 outline-none focus:ring-2 focus:ring-emerald-500/20 placeholder:tracking-normal placeholder:font-semibold"
             />

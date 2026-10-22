@@ -10,6 +10,7 @@ import {
   writeProgress,
   type OnboardingStepId,
 } from './onboardingProgress';
+import { useWaitForPartner } from '../../hooks/useWaitForPartner';
 import { useBackHandler } from '../../hooks/useBackHandler';
 import IncomeStep from './steps/IncomeStep';
 import BudgetLimitsStep from './steps/BudgetLimitsStep';
@@ -61,7 +62,9 @@ interface OnboardingProps {
    * other person's screen, so asking for it IS the permission.
    */
   onGenerateLinkCode?: () => Promise<string | null>;
-  onJoinWithCode?: (code: string) => Promise<{ ok: boolean; message?: string }>;
+  onJoinWithCode?: (code: string) => Promise<{ ok: boolean; message?: string; partnerName?: string }>;
+  /** Whether the partner has used the code this phone is showing. */
+  onCheckForPartner?: () => Promise<{ linked: boolean; partnerName?: string }>;
 }
 
 const STEPS = [
@@ -132,7 +135,9 @@ const SETUP_STEP_COUNT = Object.keys(SETUP_STEP_NUMBERS).length;
 
 const StepWrapper = OnboardingStepWrapper;
 
-const Onboarding: React.FC<OnboardingProps> = ({ onComplete, setup, onGenerateLinkCode, onJoinWithCode }) => {
+const Onboarding: React.FC<OnboardingProps> = ({
+  onComplete, setup, onGenerateLinkCode, onJoinWithCode, onCheckForPartner,
+}) => {
   // Which named step we are on. The three opening slides are all `intro`; which
   // slide is `slide` below, and is deliberately not persisted — resuming to
   // slide two of three is not worth a write per tap.
@@ -148,6 +153,14 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, setup, onGenerateLi
   const [linkedEmail, setLinkedEmail] = useState<string | undefined>(undefined);
   const [linking, setLinking] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
+  // Set once the link has gone through, by either route. The step then says
+  // so and waits for a tap, rather than moving on as if nothing happened.
+  const [linkedWith, setLinkedWith] = useState<{ name?: string } | null>(null);
+
+  // Whoever showed their code learns it was used here; nothing else would tell them.
+  useWaitForPartner(step === 'partner' && !!myCode && !linkedWith, onCheckForPartner, (name) => {
+    setLinkedWith({ name });
+  });
 
   const userId = setup?.userId;
 
@@ -272,6 +285,10 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, setup, onGenerateLi
     // The partner's own email comes back on the linked user object once the
     // next load lands; the intro does not need it to move on.
     setLinkedEmail(undefined);
+    setLinkedWith({ name: result.partnerName });
+  };
+
+  const continueAfterLink = () => {
     if (!setup) {
       finish(false, undefined);
       return;
@@ -404,6 +421,33 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, setup, onGenerateLi
   // there is no way to get one without asking them for it — and the asking is
   // the consent. An email address is something you can know without their
   // knowing you know it.
+  if (step === 'partner' && linkedWith) {
+    return (
+      <StepWrapper className="justify-center text-center space-y-10">
+        <div className="space-y-6 animate-nest">
+          <div className="w-20 h-20 mx-auto bg-emerald-50 dark:bg-emerald-900/20 rounded-[2rem] flex items-center justify-center">
+            <svg className="w-10 h-10 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <h2 role="status" className="text-4xl font-bold text-slate-600 dark:text-slate-100 tracking-tight">
+            {linkedWith.name ? `Linked with ${linkedWith.name}` : 'You’re linked'}
+          </h2>
+          <p className="text-slate-400 dark:text-slate-500 font-medium tracking-wide text-xs leading-relaxed px-4">
+            You now share one balance, and each of you sees the other’s purchases.
+            You can choose how much they see under Vault Sharing.
+          </p>
+        </div>
+        <button
+          onClick={continueAfterLink}
+          className="w-full py-6 bg-emerald-600 text-white rounded-[2rem] font-semibold text-lg shadow-2xl shadow-emerald-500/20 active:scale-[0.97] transition-all duration-200 tracking-wide"
+        >
+          Continue
+        </button>
+      </StepWrapper>
+    );
+  }
+
   if (step === 'partner') {
     return (
       <StepWrapper className="justify-center text-center space-y-10">
@@ -453,8 +497,14 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, setup, onGenerateLi
                    {myCode}
                  </p>
                  <p className="text-[10px] text-slate-400 dark:text-slate-500 leading-snug px-4">
-                   Read this to your partner instead. It works once.
+                   Read this to your partner instead. It works once, for 30 minutes.
                  </p>
+                 {onCheckForPartner && (
+                   <p className="flex items-center justify-center gap-2 pt-1 text-[10px] font-semibold text-slate-400 dark:text-slate-500">
+                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
+                     Waiting for your partner to enter it
+                   </p>
+                 )}
                </div>
              ) : (
                <button

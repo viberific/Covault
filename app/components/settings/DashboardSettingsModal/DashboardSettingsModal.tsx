@@ -56,7 +56,8 @@ export interface DashboardSettingsModalProps {
   settings: DashboardSettings;
   user: DashboardUser | null | undefined;
   onGenerateLinkCode: () => Promise<string | null>;
-  onJoinWithCode: (code: string) => Promise<{ ok: boolean; message?: string }>;
+  onJoinWithCode: (code: string) => Promise<{ ok: boolean; message?: string; partnerName?: string }>;
+  onCheckForPartner?: () => Promise<{ linked: boolean; partnerName?: string }>;
   onChangeShareLevel: (level: 'transactions' | 'categories' | 'totals') => void;
   onChangeBudgetMode: (mode: 'separate' | 'combined') => void;
   budgets: BudgetCategory[];
@@ -87,6 +88,7 @@ const DashboardSettingsModal: React.FC<DashboardSettingsModalProps> = ({
   user,
   onGenerateLinkCode,
   onJoinWithCode,
+  onCheckForPartner,
   onChangeShareLevel,
   onChangeBudgetMode,
   budgets,
@@ -283,6 +285,7 @@ const DashboardSettingsModal: React.FC<DashboardSettingsModalProps> = ({
             user={user}
             onGenerateLinkCode={onGenerateLinkCode}
             onJoinWithCode={onJoinWithCode}
+            onCheckForPartner={onCheckForPartner}
             shareLevel={settings.shareLevel ?? 'transactions'}
             onChangeShareLevel={onChangeShareLevel}
             budgetMode={settings.budgetMode ?? 'separate'}

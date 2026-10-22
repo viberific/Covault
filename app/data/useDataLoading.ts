@@ -704,6 +704,7 @@ export const useDataLoading = ({
         if (data && data.length > 0 && data[0].partner_id) {
           const partnerId = data[0].partner_id;
           const partnerName = data[0].partner_name;
+          const partnerEmail = data[0].partner_email;
 
           setAppState(prev => {
             if (!isCurrentAccountDataScope(accountScopeRef, scope) || prev.user?.id !== scope.userId) return prev;
@@ -715,6 +716,11 @@ export const useDataLoading = ({
                 hasJointAccounts: true,
                 partnerId,
                 partnerName: partnerName || undefined,
+                // Vault Sharing used to read only this to decide whether the
+                // account was linked, and nothing but the moment of linking
+                // set it — so after any restart both partners were offered
+                // "Show my code" again, with no way to see or disconnect.
+                partnerEmail: partnerEmail || undefined,
               },
             };
           });
