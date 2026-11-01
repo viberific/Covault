@@ -90,6 +90,24 @@ function withNotificationIdIfKnown(rawText: string, captureNotificationId: numbe
 /** Tolerance for comparing monetary amounts */
 const AMOUNT_TOLERANCE = NOTIFICATION_AMOUNT_TOLERANCE;
 
+/**
+ * The local calendar day a purchase belongs to: the day its notification was
+ * posted. A missing, invalid or future timestamp (a skewed clock, an older APK
+ * that sent none) falls back to today, because a purchase cannot have happened
+ * after it was processed.
+ */
+export function captureDayOf(notificationTimestamp: number | undefined, nowMs: number = Date.now()): string {
+  if (
+    typeof notificationTimestamp !== 'number'
+    || !Number.isFinite(notificationTimestamp)
+    || notificationTimestamp <= 0
+    || notificationTimestamp > nowMs
+  ) {
+    return toLocalIsoDay(new Date(nowMs));
+  }
+  return toLocalIsoDay(new Date(notificationTimestamp));
+}
+
 /** Number of days tolerance for recurring transaction date matching */
 const RECURRING_DATE_TOLERANCE_DAYS = 3;
 
@@ -1054,10 +1072,17 @@ async function processNotificationWithAIImpl(
   // not a purchase at all still costs nothing: the parser has just said this
   // one is. Each promise is made safe to abandon, because the paths below can
   // return before some of them are read.
-  const today = getLocalToday();
-  const todayMs = parseLocalDate(today).getTime();
-  const step4WindowStart = toLocalIsoDay(new Date(todayMs - RECURRING_DATE_TOLERANCE_DAYS * MS_PER_DAY));
-  const step4WindowEnd = toLocalIsoDay(new Date(todayMs + RECURRING_DATE_TOLERANCE_DAYS * MS_PER_DAY));
+  //
+  // The purchase is dated by when the bank announced it, not by when this
+  // pipeline got to it. Those differ whenever the app was closed: the native
+  // queue holds the alert until the next launch, and dating it "today" filed
+  // a Friday purchase on whatever day the user next opened Review — usually
+  // the day they confirmed its category. Every window and pairing below
+  // centres on that same day, so the duplicate checks look where the row is.
+  const captureDay = captureDayOf(input.notificationTimestamp);
+  const captureDayMs = parseLocalDate(captureDay).getTime();
+  const step4WindowStart = toLocalIsoDay(new Date(captureDayMs - RECURRING_DATE_TOLERANCE_DAYS * MS_PER_DAY));
+  const step4WindowEnd = toLocalIsoDay(new Date(captureDayMs + RECURRING_DATE_TOLERANCE_DAYS * MS_PER_DAY));
 
   // Promise.resolve rather than calling .then on the builder: a query builder
   // is thenable, so this issues the read immediately, and it also survives a
@@ -1423,7 +1448,7 @@ async function processNotificationWithAIImpl(
     vendor,
     aliases: vendorAliases,
     amount,
-    date: today,
+    date: captureDay,
   });
 
   if (duplicateDecision.kind === 'hard') {
@@ -1521,7 +1546,7 @@ async function processNotificationWithAIImpl(
   // Closest first, so when several rows could match, the nearest in amount and
   // then in time is the one consumed.
   if (input.channel === 'email' && existingTx && existingTx.length > 0) {
-    const claimed = findUnpairedBankCaptureForEmail(existingTx, { vendor, amount, date: today });
+    const claimed = findUnpairedBankCaptureForEmail(existingTx, { vendor, amount, date: captureDay });
     if (claimed) {
       log.debug(
         `[AI pipeline] Email repeats a bank capture: ${claimed.vendor} $${claimed.amount} on ${claimed.date}; dropping the email copy`,
@@ -1571,7 +1596,7 @@ async function processNotificationWithAIImpl(
   // retried as an insert: the money is already on the books with very nearly the
   // right figure, and a second row would be worse than a slightly stale one.
   if (input.channel !== 'email' && existingTx && existingTx.length > 0) {
-    const stale = findEmailCaptureForBank(existingTx, { vendor, amount, date: today });
+    const stale = findEmailCaptureForBank(existingTx, { vendor, amount, date: captureDay });
 
     if (stale) {
       log.debug(
@@ -1707,7 +1732,7 @@ async function processNotificationWithAIImpl(
   const recurringCandidate = {
     vendors: [displayVendor, vendor, ...vendorAliases],
     amount,
-    date: today,
+    date: captureDay,
   };
   const recurringMatch =
     findRecurringScheduleMatch(recurringCandidate, existingTx || []) ??
@@ -1732,7 +1757,7 @@ async function processNotificationWithAIImpl(
     // insert.
     if (isRecordedOccurrenceNearCapture(
       recurringMatch.date,
-      today,
+      captureDay,
       RECURRING_DATE_TOLERANCE_DAYS,
     )) {
       const { error: attachError } = await supabase
@@ -1806,7 +1831,7 @@ async function processNotificationWithAIImpl(
   // arrive as different notifications, so every guard above lets both through;
   // this is the first point where we know enough to recognise them as one
   // purchase. Whoever claims it inserts, the other backs off.
-  const purchaseKey = `${userId}|${today}|${storedAmount.toFixed(2)}|${normalizeVendorForDedup(finalVendorName)}`;
+  const purchaseKey = `${userId}|${captureDay}|${storedAmount.toFixed(2)}|${normalizeVendorForDedup(finalVendorName)}`;
   //
   // This one applies to a forced reprocess as well, unlike the dedup checks at
   // the top. Those ask "have we seen this before?", which a rescan is entitled
@@ -1865,7 +1890,7 @@ async function processNotificationWithAIImpl(
     // The raw notification below still carries what the bank actually said,
     // plus a marker recording the substitution, so nothing is lost.
     amount: storedAmount,
-    date: today,
+    date: captureDay,
     // Use the same column names as toSupabaseTransaction (the known-working manual insert path)
     budget: categoryName || 'Other',
     type: 'Automatic',
@@ -1968,7 +1993,7 @@ async function processNotificationWithAIImpl(
     .from('transactions')
     .select('id, vendor, amount, date, created_at')
     .eq('user_id', userId)
-    .eq('date', today)
+    .eq('date', captureDay)
     .eq('amount', storedAmount);
 
   if (raceCheck && raceCheck.length > 1) {

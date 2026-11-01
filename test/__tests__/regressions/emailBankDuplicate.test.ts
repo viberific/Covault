@@ -158,7 +158,7 @@ describe('the rule is wired the way it has to be', () => {
   });
 
   it('uses the looser same-charge test, not the same-day same-cent one', () => {
-    expect(PROCESSOR).toMatch(/findUnpairedBankCaptureForEmail\(existingTx, \{ vendor, amount, date: today \}\)/);
+    expect(PROCESSOR).toMatch(/findUnpairedBankCaptureForEmail\(existingTx, \{ vendor, amount, date: captureDay \}\)/);
   });
 
   it('a later bank alert upgrades the email row instead of duplicating it', () => {
