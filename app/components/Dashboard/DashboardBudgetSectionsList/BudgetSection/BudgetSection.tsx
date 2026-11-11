@@ -544,7 +544,12 @@ const BudgetSection: React.FC<BudgetSectionProps> = ({
                 </button>
               ) : (
                 <span className="text-[11px] font-medium tracking-wide mt-0.5 motion-safe:transition-colors motion-safe:duration-[320ms] text-slate-400 dark:text-slate-500">
-                  Vault Capacity
+                  {/* Rollover makes the limit here larger than the one set in
+                      Settings, so the open card says by how much — otherwise
+                      it reads as the limit having changed by itself. */}
+                  {budget.carriedOver && budget.carriedOver > 0
+                    ? `Vault Capacity · $${budget.carriedOver.toFixed(0)} carried over`
+                    : 'Vault Capacity'}
                 </span>
               )}
             </>

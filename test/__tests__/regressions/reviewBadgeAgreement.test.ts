@@ -45,7 +45,7 @@ describe('every count comes from the one selector', () => {
   const parsing = read('app/components/review/TransactionParsing/TransactionParsing.tsx');
 
   it('the home screen badge reads countAwaitingReview', () => {
-    expect(dashboard).toContain('countAwaitingReview(state.transactions)');
+    expect(dashboard).toContain('countAwaitingReview(myTransactions)');
   });
 
   it('the home screen no longer rolls its own filter', () => {
@@ -54,7 +54,16 @@ describe('every count comes from the one selector', () => {
   });
 
   it('the widget pill reads the same selector over the same list', () => {
-    expect(dashboard).toContain('pendingReview: countAwaitingReview(state.transactions)');
+    expect(dashboard).toContain('pendingReview: countAwaitingReview(myTransactions)');
+  });
+
+  it('all of them count only captures this person can file', () => {
+    // A partner who shares every purchase has their waiting captures on this
+    // phone too, but only their owner may change them. Counted here, they
+    // left a badge nothing on this phone could clear.
+    expect(dashboard).toContain("transactionsForView(normalizedTransactions, myUserId, 'me')");
+    expect(dashboard).toContain('allTransactions={myTransactions}');
+    expect(dashboard).not.toContain('countAwaitingReview(state.transactions)');
   });
 
   it('the Review page list and its badge read selectAwaitingReview', () => {

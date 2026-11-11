@@ -13,6 +13,12 @@ export function appErrorMessage(error: unknown): string {
       ? error.message.toLowerCase()
       : '';
 
+  // Nothing failed here and nothing is uncertain: the purchase is someone
+  // else's. Says so, rather than suggesting the user check and try again.
+  if (/belongs to your partner/.test(detail)) {
+    return "That purchase is your partner's. Only they can change or delete it.";
+  }
+
   // A bare "Failed to fetch" could come from a read or a write. Give read
   // guidance only when the message identifies both a read verb and its data.
   if (/(?:load(?:ing)?|read(?:ing)?|fetch(?:ing)?)\s*(?:transactions?|purchases?)\b/.test(detail)) {

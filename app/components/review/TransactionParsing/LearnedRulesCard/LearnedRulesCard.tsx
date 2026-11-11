@@ -9,6 +9,7 @@ import type { NotificationRule, PatternType } from '../../../../lib/capture/noti
 import type { VendorOverride, MatchType } from '../../../../lib/vendors/useVendorOverrides';
 import { toVendorKey } from '../../../../lib/capture/deviceTransactionParser';
 import { formatCurrency } from '../../../../lib/money/formatCurrency';
+import { parseLocalDate } from '../../../../lib/time/dateUtils';
 import { findStaleOtherRules, findChainMergeGroups, StaleOtherGroup, ChainMergeGroup } from '../../../../lib/vendors/ruleCleanup';
 import { BudgetCategory, Toast, Transaction } from '../../../../types';
 import {
@@ -727,7 +728,7 @@ const LearnedRulesCard: React.FC<LearnedRulesCardProps> = ({
                                     {formatCurrency(tx.amount)}
                                   </span>
                                   <span className="text-[11px] text-slate-400 dark:text-slate-500 ml-2 shrink-0">
-                                    {new Date(tx.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                    {parseLocalDate(tx.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                                   </span>
                                 </div>
                               ))}

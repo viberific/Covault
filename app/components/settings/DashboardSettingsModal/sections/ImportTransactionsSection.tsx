@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { restFetch } from '../../../../lib/api/apiHelpers';
+import { parseImportedAmount } from '../../../../lib/money/importedAmount';
 import type { BudgetCategory } from '../../../../types';
 import SettingsCard from '../../../common/SettingsCard';
 import SectionHeader from '../../../common/SectionHeader';
@@ -136,8 +137,8 @@ const ImportTransactionsSection: React.FC<ImportTransactionsSectionProps> = ({
         }
 
         // Parse amount
-        const amount = parseFloat(rawAmount.replace(/[$,]/g, ''));
-        if (isNaN(amount)) {
+        const amount = parseImportedAmount(rawAmount);
+        if (amount === null) {
           errors.push(`Row ${i + 1}: invalid amount "${rawAmount}".`);
           continue;
         }

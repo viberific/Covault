@@ -1,7 +1,7 @@
 import type { Transaction } from '../../types';
 import { parseLocalDate } from '../time/dateUtils';
 import { daysApart, isSameCharge, SAME_CHARGE_DAY_TOLERANCE } from './duplicateCharge';
-import { addMonths, normalizeRecurrence, stepForward } from './recurrence';
+import { addMonths, normalizeRecurrence, occurrenceAfter } from './recurrence';
 
 /**
  * Shape of the ids minted below: `projected-<source row id>-<YYYY-MM-DD>`.
@@ -45,7 +45,8 @@ function getTransactionBudgetId(tx: Transaction): string | undefined {
  *
  * Rules:
  * - Monthly, Biweekly and Yearly recurrences are projected.
- * - Current-month occurrences are included so on/before-today entries can solidify.
+ * - Occurrences on or before today are included as spent (`is_projected:
+ *   false`), in whichever month they fell — this one or an earlier one.
  * - Future occurrences stay projected until their date arrives.
  * - Project up to 3 months ahead as a rolling horizon.
  * - Display-only (never written to DB).
@@ -76,7 +77,6 @@ export function generateProjectedTransactions(
   today.setHours(0, 0, 0, 0);
 
   const horizon = addMonths(today, 3);
-  const currentMonthKey = toIsoDay(today).slice(0, 7);
 
   // The saved rows an occurrence could turn out to be. Anything already
   // carrying a projected id is one of these, not a charge that happened.
@@ -151,21 +151,23 @@ export function generateProjectedTransactions(
     // parses as UTC midnight, which lands on the previous local day for users
     // in negative-offset timezones and shifts the projected day-of-month after
     // the first addMonths().
-    let current = parseLocalDate(toIsoDay(tx.date));
-    if (Number.isNaN(current.getTime())) continue;
+    const anchor = parseLocalDate(toIsoDay(tx.date));
+    if (Number.isNaN(anchor.getTime())) continue;
 
-    while (true) {
-      current = stepForward(current, recurrence);
+    // Counted from the anchor, not chained — see occurrenceAfter for what
+    // chaining did to a charge that falls on the 29th, 30th or 31st.
+    for (let step = 1; ; step++) {
+      const current = occurrenceAfter(anchor, recurrence, step);
 
       if (current > horizon) break;
 
-      const isoDate = toIsoDay(current);
-      const projectedMonthKey = isoDate.slice(0, 7);
-      const isCurrentMonth = projectedMonthKey === currentMonthKey;
-
-      if (current > today || isCurrentMonth) {
-        candidates.push({ source: tx, date: isoDate, isFuture: current > today });
-      }
+      // Every occurrence, including the ones in months already over. Those
+      // used to be dropped the moment their month ended: a subscription was
+      // counted all through September and then vanished from September on the
+      // 1st of October, so a browsed month's closing balance was too high by
+      // every recurring charge that had fallen in it. An occurrence whose day
+      // has come is spent money whichever month it is being read from.
+      candidates.push({ source: tx, date: toIsoDay(current), isFuture: current > today });
     }
   }
 

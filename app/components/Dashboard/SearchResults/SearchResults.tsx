@@ -81,8 +81,21 @@ const SearchResults: React.FC<SearchResultsProps> = ({
   );
 
   const projectedFuture = useMemo(
-    () => projectedTransactions.filter((tx) => txYearMonth(tx.date) !== currentYearMonth),
+    () => projectedTransactions.filter((tx) => txYearMonth(tx.date) > currentYearMonth),
     [projectedTransactions, currentYearMonth],
+  );
+
+  // Recurring charges that fell in earlier months. They belong with the past
+  // entries, in date order, not under "future".
+  const projectedPast = useMemo(
+    () => projectedTransactions.filter((tx) => txYearMonth(tx.date) < currentYearMonth),
+    [projectedTransactions, currentYearMonth],
+  );
+
+  const augmentedPast = useMemo(
+    () => [...pastTransactions, ...projectedPast]
+      .sort((a, b) => b.date.slice(0, 10).localeCompare(a.date.slice(0, 10))),
+    [pastTransactions, projectedPast],
   );
 
   const augmentedCurrent = useMemo(
@@ -96,7 +109,7 @@ const SearchResults: React.FC<SearchResultsProps> = ({
   );
 
   const filteredCurrent = useMemo(() => augmentedCurrent.filter(filterFn), [augmentedCurrent, filterFn]);
-  const filteredPast = useMemo(() => pastTransactions.filter(filterFn), [pastTransactions, filterFn]);
+  const filteredPast = useMemo(() => augmentedPast.filter(filterFn), [augmentedPast, filterFn]);
   const filteredFuture = useMemo(() => augmentedFuture.filter(filterFn), [augmentedFuture, filterFn]);
   const { futureActualTransactions, futureProjectedTransactions } = useMemo(() => {
     return filteredFuture.reduce(

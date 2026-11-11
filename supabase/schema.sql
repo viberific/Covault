@@ -464,13 +464,13 @@ BEGIN
     RETURN QUERY
       SELECT v_level, t.budget::text, SUM(t.amount)::numeric
         FROM public.transactions t
-       WHERE t.user_id = v_partner AND to_char(t.date, 'YYYY-MM') = p_month AND t.is_projected = false
+       WHERE t.user_id = v_partner AND to_char(t.date, 'YYYY-MM') = p_month AND t.is_projected = false AND t.refunded = false
        GROUP BY t.budget;
   ELSE
     RETURN QUERY
       SELECT v_level, NULL::text, COALESCE(SUM(t.amount), 0)::numeric
         FROM public.transactions t
-       WHERE t.user_id = v_partner AND to_char(t.date, 'YYYY-MM') = p_month AND t.is_projected = false;
+       WHERE t.user_id = v_partner AND to_char(t.date, 'YYYY-MM') = p_month AND t.is_projected = false AND t.refunded = false;
   END IF;
 END;
 $function$;

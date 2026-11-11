@@ -157,6 +157,7 @@ Requests arrive in plain language. Start here, not with a repo-wide search.
 | "nothing is captured at all any more" | `app/lib/capture/captureSources.ts` first — `isCaptureSourceAllowed` returning false for everything is the one silent, total failure this app has. Check `monitored_apps_chosen` before anything else |
 | "I got two rows for one tap-to-pay purchase" | `app/lib/capture/captureChannel.ts` (`isOtherAppSameTap`) → step 4d of `app/lib/capture/notificationProcessor.ts`. Matched on amount and timing, never on the merchant name |
 | "a subscription got captured / notified about anyway" | `app/lib/transactions/recurringSchedule.ts` — matches the capture against the recurring *schedule*, not just nearby rows; applied at step 5b. The notification is suppressed in `NotificationListener.java` (`RECURRING_CHARGES_KEY`) and withdrawn by `useNotificationListener.ts` when it slipped through |
+| "the limit on a vial is higher than the one I set" / "rollover isn't carrying anything" | `app/lib/budgets/budgetRollover.ts` → `vialBudgetList` in `app/components/Dashboard/Dashboard.tsx`. See Invariants |
 | "the budget pills keep rearranging" | `app/lib/budgets/budgetOrder.ts` — the `budgets` table has no sort column, so the order is fixed in code. See Invariants |
 | "my budget limits / hidden categories are back to the defaults" | `loadUserBudgets` in `app/data/useDataLoading.ts` → `app/lib/budgets/budgetFallback.ts`. Check the Supabase edge logs for a non-200 on `/rest/v1/budgets` before assuming the data is gone — it usually isn't |
 | "it picked the wrong category" | `app/components/review/useVendorMatcher.ts`, `app/lib/vendors/vendorMatchConfidence.ts`, step 5a of the processor |
@@ -339,9 +340,13 @@ Do not "clean these up". Each one was a real failure that cost real debugging.
   optimistically and `saveSettingToDb` only logs failures, so a missing column
   is indistinguishable from success. Check the column exists.
 - **Recurring charges are never written to the database.**
-  `app/lib/transactions/projectedTransactions.ts` already includes the current month's
-  occurrences in the dashboard total — an occurrence whose date has passed is
-  emitted with `is_projected: false`, so it counts exactly like a real row. A
+  `app/lib/transactions/projectedTransactions.ts` already includes every
+  occurrence up to today in the totals — an occurrence whose date has passed is
+  emitted with `is_projected: false`, so it counts exactly like a real row, in
+  whichever month it fell. Past months are included on purpose: dropping them
+  made a subscription vanish from September on the 1st of October and left
+  every browsed month's closing balance too high
+  (`pastMonthKeepsItsSubscriptions.test.ts`). A
   `lib/recurringExecutor.ts` used to also insert a real row per due date; every
   subscription was therefore counted twice, and because those rows carried
   label `Automatic` they queued up in Review, where the user deleted them by
@@ -349,6 +354,34 @@ Do not "clean these up". Each one was a real failure that cost real debugging.
   every morning. Do not re-add a DB-writing catch-up. Rows already in the DB
   with `source: 'executor'` are left alone and are still skipped as projection
   sources.
+
+- **A recurring occurrence is counted from the series' first date, never from
+  the occurrence before it.** `occurrenceAfter` in
+  `app/lib/transactions/recurrence.ts` holds a charge on the 29th, 30th or 31st
+  to the last day of a shorter month. Stepping each occurrence from the last
+  one let the calendar overflow carry: rent entered on Jan 31 was missing from
+  February, then expected on the 3rd of every month after, four weeks from the
+  real charge — too far for the real charge to cancel it, so the rent counted
+  twice from March on. `recurringMonthEnd.test.ts` pins it.
+
+- **Budget Rollover carries one month, from the limit the user SET.**
+  `app/lib/budgets/budgetRollover.ts` adds last month's unspent whole dollars
+  to this month's limit on the list the vials, the shield and the over-budget
+  alerts read — never to `state.budgets`, which is what Settings edits and
+  saves. Not compounding on purpose: a carry worked out from an already
+  carried limit grows without anybody deciding it should. Nothing carries from
+  before the vault had any spending, or every limit doubles on a new user's
+  first day; an overspent category carries no debt; the chart keeps the limits
+  as set. `budgetRollover.test.ts` pins it.
+
+- **A partner's purchases can be read here and changed only by their owner.**
+  The database refuses an edit or delete of someone else's row and answers the
+  refusal with success, so `useTransactionOps.ts` refuses first and says why,
+  and a recurring delete is planned over the signed-in person's rows only.
+  Review, its badge and the widget's pill count the signed-in person's
+  captures alone (`myTransactions` in `Dashboard.tsx`), because a partner's
+  waiting capture cannot be filed from this phone.
+  `partnerPurchaseIsNotMineToChange.test.tsx` pins it.
 
 - **A cadence the `Recurrence` enum does not know cannot be stored OR asked
   about.** `transactions.recur` is a Postgres enum, not free text, so adding a

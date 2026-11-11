@@ -9,6 +9,7 @@ import SectionHeader from '../../../common/SectionHeader';
 import { getLocalMonthKey } from '../../../../lib/time/dateUtils';
 import { getBudgetColor } from '../../../../lib/budgets/budgetColors';
 import { countedAmount } from '../../../../lib/transactions/refundMatching';
+import { generateProjectedTransactions } from '../../../../lib/transactions/projectedTransactions';
 
 interface ReportSectionProps {
   budgets: BudgetCategory[];
@@ -28,18 +29,26 @@ const ReportSection: React.FC<ReportSectionProps> = ({
   // Snapshot the clock once per mount. This ran on every render before,
   // rebuilding an Intl formatter each time and invalidating the memos below
   // that take monthKey as a dependency.
-  const { monthKey, monthLabel } = useMemo(() => {
+  const { monthKey, monthLabel, todayIso } = useMemo(() => {
     const now = new Date();
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     return {
       monthKey: getLocalMonthKey(todayStr),
+      todayIso: todayStr,
       monthLabel: now.toLocaleString('default', { month: 'long', year: 'numeric' }),
     };
   }, []);
 
+  // This month's real rows, plus the recurring charges whose day has already
+  // come. Those are never saved as rows — the dashboard draws them from the
+  // schedule and counts them as spent — so the report used to leave every
+  // subscription out and show less spending than the vials it summarises.
   const currentMonthTxs = useMemo(
-    () => transactions.filter(tx => !tx.is_projected && getLocalMonthKey(tx.date) === monthKey),
-    [transactions, monthKey],
+    () => [
+      ...transactions,
+      ...generateProjectedTransactions(transactions, todayIso),
+    ].filter(tx => !tx.is_projected && getLocalMonthKey(tx.date) === monthKey),
+    [transactions, monthKey, todayIso],
   );
 
   const budgetRows = useMemo(() => {
@@ -53,7 +62,9 @@ const ReportSection: React.FC<ReportSectionProps> = ({
       spentById.set(tx.budget_id, (spentById.get(tx.budget_id) ?? 0) + countedAmount(tx));
     }
     return budgets
-      .filter(b => b.totalLimit > 0)
+      // A category with no limit still appears once money has gone to it.
+      // Leaving it out also left its spending out of the total below.
+      .filter(b => b.totalLimit > 0 || (spentById.get(b.id) ?? 0) !== 0)
       .map((b, i) => ({
         name: b.name,
         spent: spentById.get(b.id) ?? 0,
@@ -62,7 +73,14 @@ const ReportSection: React.FC<ReportSectionProps> = ({
       }));
   }, [budgets, currentMonthTxs]);
 
-  const totalSpent = budgetRows.reduce((acc, b) => acc + b.spent, 0);
+  // Every purchase this month, by the dashboard's own per-row rule — not the
+  // sum of the rows above. Summing the rows dropped whatever was filed under a
+  // category with no limit, or under one that no longer exists, so "Total
+  // Spent" and "Remaining" disagreed with the balance on the dashboard.
+  const totalSpent = useMemo(
+    () => currentMonthTxs.reduce((acc, tx) => acc + countedAmount(tx), 0),
+    [currentMonthTxs],
+  );
   const remaining = monthlyIncome - totalSpent;
 
   const buildReportHTML = (): string => {
@@ -75,8 +93,12 @@ const ReportSection: React.FC<ReportSectionProps> = ({
 
     const rowsHTML = budgetRows.map(b => {
       const pctRaw = b.limit > 0 ? Math.round((b.spent / b.limit) * 100) : 0;
-      const pct = Math.min(100, pctRaw);
-      const isOver = pctRaw >= 100;
+      // No limit and money spent is over by definition; there is no
+      // percentage to give, so the bar is full and the badge says the rest.
+      const noLimit = b.limit <= 0;
+      const isOver = noLimit ? b.spent > 0 : pctRaw >= 100;
+      const pct = noLimit ? (isOver ? 100 : 0) : Math.min(100, pctRaw);
+      const pctLabel = noLimit ? 'No limit' : `${pctRaw}%`;
       const isNear = pctRaw >= 80 && pctRaw < 100;
       const barColor = isOver ? '#ef4444' : b.color;
       const pctColor = isOver ? '#dc2626' : isNear ? '#d97706' : '#94a3b8';
@@ -104,7 +126,7 @@ const ReportSection: React.FC<ReportSectionProps> = ({
             <div style="height:100%;width:${pct}%;background:${barColor};border-radius:999px;"></div>
           </div>
           <div style="display:flex;justify-content:flex-end;margin-top:5px;">
-            <span style="font-size:10px;font-weight:700;color:${pctColor};">${pctRaw}%</span>
+            <span style="font-size:10px;font-weight:700;color:${pctColor};">${pctLabel}</span>
           </div>
         </div>`;
     }).join('');

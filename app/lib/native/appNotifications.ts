@@ -193,14 +193,16 @@ export async function checkAndTriggerAppNotifications({
     }
 
     // Check remaining balance
-    if (remainingMoney <= 0) {
+    // Strictly below zero: a balance of exactly $0 has not gone negative, and
+    // the alert is remembered for the month, so firing it early also spent it.
+    if (remainingMoney < 0) {
       const key = makeBalanceAlertKey(userId, alertMonth);
       const alreadySent =
         typeof localStorage !== 'undefined' && localStorage.getItem(key) === '1';
       if (!alreadySent) {
         await sendNotification(
           'Balance alert',
-          `Your remaining balance ($${remainingMoney.toFixed(0)}) has gone negative.`,
+          `Your remaining balance (-$${Math.abs(remainingMoney).toFixed(0)}) has gone negative.`,
         );
         if (typeof localStorage !== 'undefined') {
           localStorage.setItem(key, '1');

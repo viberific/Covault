@@ -93,6 +93,7 @@ line matches.
 | `2026_09_household_sharing.sql` | `household_sharing_modes`, `household_partner_reads` | applied 2026-09-13 |
 | `2026_09_security_review.sql` | four `security_review_*` entries | applied 2026-09-14 |
 | `2026_09_settings_insert_columns.sql` | — (run in the SQL editor) | applied 2026-10-03 |
+| `2026_11_partner_summary_skips_refunded.sql` | — (run in the SQL editor) | **not applied yet** — until it is, a partner's refunded purchase still counts in the total their partner's phone is given |
 
 Everything else in `supabase/migrations/` was run by hand in the SQL editor
 before the log existed, and live already reflects it. The four files marked

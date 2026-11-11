@@ -67,7 +67,7 @@ const FAQ_ITEMS: FAQItem[] = [
   },
   {
     question: "What is Budget Rollover?",
-    answer: "When rollover is enabled, unspent money in a category carries over to the next month. This lets surplus accumulate across billing cycles."
+    answer: "When rollover is on, whatever a category did not spend last month is added to its limit this month. The open vial shows how much was carried over. Only one month carries: the amount is worked out from the limit you set, so it does not keep growing. An overspent category carries nothing."
   },
   {
     question: "What is the Discretionary Shield?",
