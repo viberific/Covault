@@ -36,9 +36,11 @@ import { getLocalMonthKey, getLocalToday } from '../../lib/time/dateUtils';
 import { callRpc } from '../../lib/api/apiHelpers';
 import {
   householdIncome,
+  householdSpend,
   householdBudgets,
   defaultHouseholdView,
   transactionsForView,
+  spendingAgainstMyBudgets,
   budgetsForView,
   incomeForView,
   type HouseholdView,
@@ -50,7 +52,8 @@ import { HouseholdPeopleContext, partnerLabelFrom, initialOf } from '../transact
 import { useCurrentDay } from '../../hooks/useCurrentDay';
 import { useBackHandler } from '../../hooks/useBackHandler';
 import { useMonthSelection } from './useMonthSelection';
-import { balanceLabelForMonth, remainingForMonth } from '../../lib/time/monthWindow';
+import { balanceLabelForMonth } from '../../lib/time/monthWindow';
+import { usePartnerMonthSummary } from './usePartnerMonthSummary';
 import { isInMonth } from '../../lib/transactions/transactionOrdering';
 import { checkAndTriggerAppNotifications } from '../../lib/native/appNotifications';
 import { supabase } from '../../lib/api/supabase';
@@ -67,6 +70,7 @@ import { buildWidgetSnapshot } from '../../lib/native/widgetSnapshot';
 import { pushWidgetSnapshot, pushRecurringCharges, type WidgetVendorRule } from '../../lib/native/covaultNotification';
 import { countAwaitingReview } from '../../lib/capture/reviewQueue';
 import { computeShieldBreakdown, type ShieldBreakdown } from '../../lib/budgets/discretionaryShield';
+import { rolloverCarry, withRollover } from '../../lib/budgets/budgetRollover';
 import { collectRecurringCharges } from '../../lib/transactions/recurringSchedule';
 import { useAIModelOnDevice } from './useAIModelOnDevice';
 import { SettingSaveQueue } from '../../lib/settings/settingSaveQueue';
@@ -341,6 +345,15 @@ const Dashboard: React.FC<Props> = ({
   // would be an empty screen and "Us" would be only you; the dashboard then
   // stays on what the budget mode shows, exactly as before the switch existed.
   const myUserId = state.user?.id || '';
+  // The signed-in person's own rows. Review, its badge and the widget's pill
+  // are about captures THIS person can file: a partner's waiting captures are
+  // readable here when they share every purchase, but the database lets only
+  // their owner change them, so counting them left a badge that could never
+  // be cleared from this phone.
+  const myTransactions = useMemo(
+    () => transactionsForView(normalizedTransactions, myUserId, 'me'),
+    [normalizedTransactions, myUserId],
+  );
   const canChooseView = !!state.user?.partnerId && !state.partnerSummary;
   // Opens on Us, and goes back to it whenever the app is left and returned to.
   const [chosenView, setChosenView] = useHouseholdViewChoice();
@@ -369,6 +382,19 @@ const Dashboard: React.FC<Props> = ({
       ? 'My Activity'
       : householdView === 'them' ? `${partnerLabel}’s Activity` : 'Our Activity';
 
+  // What the widget's donut and lists are drawn from: this month's real rows,
+  // plus the recurring charges whose day has already come. Those are never
+  // written to the database — the projection emits them as spent — so a list
+  // of real rows alone left every subscription out of the widget's spending
+  // while the vials and the balance beside it counted them.
+  const widgetMonthTransactions = useMemo(
+    () => [
+      ...currentMonthTransactions,
+      ...projectedTransactions.filter((t) => !t.is_projected && isInMonth(t, monthKey)),
+    ],
+    [currentMonthTransactions, projectedTransactions, monthKey],
+  );
+
   // ── Home-screen widget ──
   // The widget runs in the native process with no Supabase session, so it can
   // only draw what we hand it. Push a fresh snapshot whenever the figures it
@@ -382,13 +408,13 @@ const Dashboard: React.FC<Props> = ({
     if (!Capacitor.isNativePlatform()) return;
     const snapshot = buildWidgetSnapshot({
       budgets: state.budgets,
-      currentMonthTransactions,
+      currentMonthTransactions: widgetMonthTransactions,
       remaining: remainingMoney,
       income: state.user?.monthlyIncome || 0,
       theme: state.settings.theme ?? null,
       // Same selector the Review list and the bottom-bar badge use, so the
       // widget's pill can't disagree with either.
-      pendingReview: countAwaitingReview(state.transactions),
+      pendingReview: countAwaitingReview(myTransactions),
     });
     // The user's OWN rules, and deliberately nothing else. The native matcher
     // (native/android/WidgetDeltaStore.java) carries its own auto-file
@@ -405,12 +431,12 @@ const Dashboard: React.FC<Props> = ({
     void pushWidgetSnapshot(snapshot, rules, state.settings.auto_accept_known_vendors === true);
   }, [
     state.budgets,
-    currentMonthTransactions,
+    widgetMonthTransactions,
     remainingMoney,
     state.user?.monthlyIncome,
     state.settings.theme,
     vendorOverrides,
-    state.transactions,
+    myTransactions,
     state.settings.auto_accept_known_vendors,
   ]);
 
@@ -561,6 +587,68 @@ const Dashboard: React.FC<Props> = ({
     [chartTransactions, myUserId, householdView],
   );
 
+  // ── Budget Rollover ──
+  //
+  // What each category did not spend in the month before the one on screen,
+  // added to its limit. Read from the same people's rows and the same limits
+  // as the vials, so the figure carried is last month's vial, finished. A
+  // month still to come carries nothing — the month before it is not over.
+  //
+  // The chart keeps the limits as set: its lines run across seven months, and
+  // one month's carry drawn along all of them would be wrong for six.
+  const vialBudgetList = useMemo(() => {
+    if (!state.settings.rolloverEnabled || viewMonthRelation === 'future') return viewBudgetList;
+    return withRollover(
+      viewBudgetList,
+      rolloverCarry(
+        viewBudgetList,
+        transactionsForView(normalizedTransactions, myUserId, householdView),
+        viewMonthKey,
+        {
+          useLeisureAsBuffer: state.settings.useLeisureAsBuffer,
+          hiddenCategories: state.settings.hiddenCategories,
+        },
+      ),
+    );
+  }, [
+    state.settings.rolloverEnabled,
+    state.settings.useLeisureAsBuffer,
+    state.settings.hiddenCategories,
+    viewMonthRelation,
+    viewBudgetList,
+    normalizedTransactions,
+    myUserId,
+    householdView,
+    viewMonthKey,
+  ]);
+
+  // The same carry for the over-budget alerts, which follow the budget mode
+  // and the month we are in rather than what is on screen.
+  const alertBudgetList = useMemo(() => {
+    if (!state.settings.rolloverEnabled) return householdBudgetList;
+    return withRollover(
+      householdBudgetList,
+      rolloverCarry(
+        householdBudgetList,
+        spendingAgainstMyBudgets(normalizedTransactions, myUserId, budgetMode),
+        monthKey,
+        {
+          useLeisureAsBuffer: state.settings.useLeisureAsBuffer,
+          hiddenCategories: state.settings.hiddenCategories,
+        },
+      ),
+    );
+  }, [
+    state.settings.rolloverEnabled,
+    state.settings.useLeisureAsBuffer,
+    state.settings.hiddenCategories,
+    householdBudgetList,
+    normalizedTransactions,
+    myUserId,
+    budgetMode,
+    monthKey,
+  ]);
+
   // ── The Discretionary Shield ──
   //
   // How much of the month's overspending the Leisure vault is absorbing. Read
@@ -580,23 +668,38 @@ const Dashboard: React.FC<Props> = ({
   const leisureShield = useMemo(() => {
     if (!state.settings.useLeisureAsBuffer) return NO_SHIELD;
     // The vials' own limits, so the shield covers an overspend the vials show.
-    return computeShieldBreakdown(viewBudgetList, viewMonthBudgetTransactions, {
+    return computeShieldBreakdown(vialBudgetList, viewMonthBudgetTransactions, {
       hiddenCategories: state.settings.hiddenCategories,
     });
   }, [
     state.settings.useLeisureAsBuffer,
     state.settings.hiddenCategories,
-    viewBudgetList,
+    vialBudgetList,
     viewMonthBudgetTransactions,
   ]);
 
   // Same arithmetic as the current month's, over the same list the vials are
   // drawing, so the figure at the top can never disagree with the bars below.
+  //
+  // A past month also takes out what a partner spent in it when their rows
+  // are not on this phone. Their summary in app state is this month's, so the
+  // browsed month's is asked for — only then, and only for a month that is
+  // over: a month still to come has nothing of theirs to report.
+  const browsedPartnerSummary = usePartnerMonthSummary(
+    state.partnerSummary && viewMonthRelation === 'past' ? viewMonthKey : null,
+  );
   const viewMonthRemaining = useMemo(
     () => (isViewingCurrentMonth
       ? remainingMoney
-      : remainingForMonth(viewMonthAllTransactions, effectiveIncome)),
-    [isViewingCurrentMonth, remainingMoney, viewMonthAllTransactions, effectiveIncome],
+      : effectiveIncome - householdSpend(viewMonthAllTransactions, myUserId, browsedPartnerSummary)),
+    [
+      isViewingCurrentMonth,
+      remainingMoney,
+      viewMonthAllTransactions,
+      effectiveIncome,
+      myUserId,
+      browsedPartnerSummary,
+    ],
   );
 
   // Stable key: changes only when a budget limit is added/removed/modified.
@@ -604,8 +707,8 @@ const Dashboard: React.FC<Props> = ({
   // Read from the limits the vials actually draw, so a household in combined
   // mode is alerted against the combined line and not one person's half of it.
   const budgetLimitKey = useMemo(
-    () => householdBudgetList.map(b => `${b.id}:${b.totalLimit}`).join(','),
-    [householdBudgetList],
+    () => alertBudgetList.map(b => `${b.id}:${b.totalLimit}`).join(','),
+    [alertBudgetList],
   );
 
   // Fire push notifications for budget overruns / low balance whenever the
@@ -616,10 +719,10 @@ const Dashboard: React.FC<Props> = ({
   // purchases do not count against your lines (see spendingAgainstMyBudgets),
   // so they must not set off an alert about them either.
   useEffect(() => {
-    if (!state.user?.id || !householdBudgetList.length) return;
+    if (!state.user?.id || !alertBudgetList.length) return;
     checkAndTriggerAppNotifications({
       userId: state.user.id,
-      budgets: householdBudgetList,
+      budgets: alertBudgetList,
       transactions: currentMonthBudgetTransactions,
       budgetMode,
       remainingMoney,
@@ -634,6 +737,10 @@ const Dashboard: React.FC<Props> = ({
     budgetLimitKey,
     budgetMode,
     remainingMoney,
+    // Moving a purchase between categories leaves the balance where it was, so
+    // the balance alone never re-ran this check and an overrun caused by
+    // re-filing went unannounced until some other purchase arrived.
+    currentMonthBudgetTransactions,
     state.settings.smart_notifications_enabled,
     state.settings.app_notifications_enabled,
   ]);
@@ -650,8 +757,8 @@ const Dashboard: React.FC<Props> = ({
   // Still derived from app state, so it drops as soon as a row is deleted
   // (optimistic removal) or cleared (reload).
   const aiTransactionsCount = useMemo(
-    () => countAwaitingReview(state.transactions),
-    [state.transactions],
+    () => countAwaitingReview(myTransactions),
+    [myTransactions],
   );
 
   // The first capture, explained once.
@@ -960,7 +1067,7 @@ const Dashboard: React.FC<Props> = ({
             } as Transaction);
           }}
           onAddTransaction={() => setShowTransactionForm(true)}
-          allTransactions={normalizedTransactions}
+          allTransactions={myTransactions}
           onTransactionTap={setSelectedTx}
           budgets={state.budgets}
           hiddenCategories={state.settings.hiddenCategories}
@@ -1147,7 +1254,7 @@ const Dashboard: React.FC<Props> = ({
 
             {/* Budget bars: vertical list on mobile, 2-col grid on desktop */}
             <DashboardBudgetSectionsList
-              budgets={viewBudgetList}
+              budgets={vialBudgetList}
               activityLabel={activityLabel}
               transactions={viewMonthBudgetTransactions}
               isCurrentMonth={isViewingCurrentMonth}

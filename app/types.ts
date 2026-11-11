@@ -21,6 +21,11 @@ export interface BudgetCategory {
   name: string;
   totalLimit: number;
   externalDeduction?: number;
+  /**
+   * How much of `totalLimit` was carried over from last month by Budget
+   * Rollover. Display-only: set on the list the vials draw, never saved.
+   */
+  carriedOver?: number;
 }
 
 // (Removed: PendingTransaction and AppState.pendingTransactions.)

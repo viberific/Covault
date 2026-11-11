@@ -30,6 +30,9 @@ import {
 // from this module.
 
 
+/** Raised when an edit or delete is aimed at a linked partner's purchase. */
+export const PARTNER_OWNED_MESSAGE = 'That purchase belongs to your partner, so only they can change it';
+
 /** PostgREST `in.(...)` list, quoted the way the other bulk calls here do. */
 const toIdList = (ids: string[]) => ids.map(id => `"${String(id).replace(/"/g, '')}"`).join(',');
 
@@ -215,7 +218,13 @@ export const useTransactionOps = ({
       const sourceTransactionId = getSourceTransactionIdFromProjectedId(updatedTx.id);
       const isProjectedEdit = Boolean(sourceTransactionId);
       const originalTx = appState.transactions.find(t => t.id === (sourceTransactionId || updatedTx.id));
-      if (originalTx && originalTx.user_id !== userId) return false;
+      if (originalTx && originalTx.user_id !== userId) {
+        // A partner's purchase is readable here but only its owner may change
+        // it. This used to return in silence, so the edit form closed as
+        // though it had saved and nothing on screen said otherwise.
+        setDbError(PARTNER_OWNED_MESSAGE);
+        return false;
+      }
 
       if (isProjectedEdit && !originalTx) {
         const msg = `[updateTransaction] Could not find source transaction for projected id ${updatedTx.id}`;
@@ -407,7 +416,22 @@ export const useTransactionOps = ({
         ? captureAccountDataScope(accountScopeRef, userId)
         : null;
       if (!userId || !isOperationScopeCurrent(accountScopeRef, scope, userId)) return null;
-      const plan = planRecurringDelete(id, appState.transactions);
+      // Only this person's own rows can be deleted — the database refuses
+      // anyone else's, and answers that refusal with success. So a partner's
+      // purchase used to vanish from the screen and come back on the next
+      // load, and ending your own subscription also took a partner's
+      // identical one off the screen, because a series is recognised by
+      // vendor, amount and day and knows nothing about whose it is.
+      const tappedId = getSourceTransactionIdFromProjectedId(id) ?? id;
+      const tapped = appState.transactions.find(t => t.id === tappedId);
+      if (tapped && tapped.user_id && tapped.user_id !== userId) {
+        setDbError(PARTNER_OWNED_MESSAGE);
+        return null;
+      }
+      const ownTransactions = appState.transactions.filter(
+        t => !t.user_id || t.user_id === userId,
+      );
+      const plan = planRecurringDelete(id, ownTransactions);
 
       if (!plan) {
         const msg = `Delete failed: no saved transaction behind ${id}`;

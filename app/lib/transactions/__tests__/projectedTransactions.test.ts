@@ -182,9 +182,13 @@ describe('generateProjectedTransactions', () => {
 
     const asOfAug3 = generateProjectedTransactions(base, '2026-08-03');
 
-    // July's occurrence is no longer part of the current month, so it is not
-    // emitted even though the system clock still says July.
-    expect(asOfAug3.map((tx) => tx.date)).not.toContain('2026-07-30');
+    // July's occurrence has happened as of Aug 3, even though the system
+    // clock still says July: it is spent money, and it stays dated in July
+    // rather than moving into the month now being read.
+    const july = asOfAug3.find((tx) => tx.date === '2026-07-30');
+    expect(july?.is_projected).toBe(false);
+    expect(asOfAug3.filter((tx) => tx.date.startsWith('2026-08')).map((tx) => tx.date))
+      .toEqual(['2026-08-30']);
     expect(asOfAug3.map((tx) => tx.date)).toContain('2026-08-30');
     // Aug 30 is after Aug 3, so it is still a projection rather than solidified.
     expect(asOfAug3.find((tx) => tx.date === '2026-08-30')?.is_projected).toBe(true);

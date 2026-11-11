@@ -10,7 +10,7 @@ import {
   scheduleLandsNear,
 } from '../../../app/lib/transactions/recurringSchedule';
 import { recurringSeriesKey } from '../../../app/lib/transactions/recurringDelete';
-import { normalizeRecurrence, stepForward } from '../../../app/lib/transactions/recurrence';
+import { normalizeRecurrence, occurrenceAfter } from '../../../app/lib/transactions/recurrence';
 import { parseNotificationText } from '../../../app/lib/capture/deviceTransactionParser';
 import { toSupabaseTransaction } from '../../../app/lib/api/transactionMappers';
 import { Recurrence } from '../../../app/types';
@@ -89,12 +89,14 @@ describe('stepping a year', () => {
   });
 
   it('moves twelve calendar months, keeping the day', () => {
-    expect(stepForward(new Date(2026, 2, 11), 'Yearly')).toEqual(new Date(2027, 2, 11));
+    expect(occurrenceAfter(new Date(2026, 2, 11), 'Yearly', 1)).toEqual(new Date(2027, 2, 11));
   });
 
-  it('rolls a Feb 29 anchor forward rather than losing it', () => {
-    // The same rule the monthly step already applies to the 31st.
-    expect(stepForward(new Date(2028, 1, 29), 'yearly')).toEqual(new Date(2029, 2, 1));
+  it('holds a Feb 29 anchor to the end of February, and returns to the 29th', () => {
+    // The same rule the monthly step applies to the 31st: the last day of a
+    // month too short for the anchor, counted from the anchor each time.
+    expect(occurrenceAfter(new Date(2028, 1, 29), 'yearly', 1)).toEqual(new Date(2029, 1, 28));
+    expect(occurrenceAfter(new Date(2028, 1, 29), 'yearly', 4)).toEqual(new Date(2032, 1, 29));
   });
 });
 
@@ -158,7 +160,12 @@ describe('projecting a yearly charge', () => {
       makeTransaction({ id: 'march', vendor: 'Blue Cross', amount: 420, date: '2026-03-11' }),
       makeTransaction({ id: 'september', vendor: 'Blue Cross', amount: 420, date: '2026-09-11' }),
     ]);
-    expect(later.map((tx) => tx.date)).toEqual(['2027-09-11']);
+    // March's renewal has happened by July: it is spent, in March. The one
+    // still expected is September's.
+    expect(later.map((tx) => [tx.date, tx.is_projected])).toEqual([
+      ['2027-03-11', false],
+      ['2027-09-11', true],
+    ]);
   });
 });
 

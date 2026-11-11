@@ -127,3 +127,33 @@ describe('what is said, and how often', () => {
     expect(titlesSent()).toEqual([]);
   });
 });
+
+describe('the balance alert', () => {
+  const balance = (remainingMoney: number) =>
+    checkAndTriggerAppNotifications({
+      userId: ME,
+      budgets: [GROCERIES],
+      transactions: [],
+      remainingMoney,
+      settings: SETTINGS,
+    });
+  const bodies = () =>
+    schedule.mock.calls.map(
+      (call) => (call[0] as { notifications: Array<{ body: string }> }).notifications[0].body,
+    );
+
+  it('stays quiet at exactly zero, which has not gone negative', async () => {
+    await balance(0);
+    expect(titlesSent()).toEqual([]);
+  });
+
+  it('is still available later in the month after a balance of zero', async () => {
+    // The alert is remembered for the month, so sending it at $0 also meant
+    // the real overdraft that followed was never mentioned.
+    await balance(0);
+    await balance(-42.4);
+    expect(titlesSent()).toEqual(['Balance alert']);
+    expect(bodies()).toEqual(['Your remaining balance (-$42) has gone negative.']);
+  });
+});
+

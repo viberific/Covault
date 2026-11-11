@@ -68,7 +68,11 @@ const ExportTransactionsSection: React.FC<ExportTransactionsSectionProps> = ({
 
     const headers = ['Date', 'Vendor', 'Amount', 'Category', 'Recurrence', 'Label'];
     const rows = filtered.map((tx) => [
-      escapeCSV(parseLocalDate(tx.date).toLocaleDateString()),
+      // YYYY-MM-DD, not the phone's own date format. A locale date is
+      // ambiguous the moment the file leaves the phone — 03/04/2026 is March
+      // in one country and April in the next — and the import screen read a
+      // day-first file back with the day and month swapped, or refused it.
+      escapeCSV(tx.date.slice(0, 10)),
       escapeCSV(tx.vendor),
       escapeCSV(tx.amount.toFixed(2)),
       escapeCSV(tx.budget_id ? (budgetMap.get(tx.budget_id) || tx.budget_id) : ''),

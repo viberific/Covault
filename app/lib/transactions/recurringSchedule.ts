@@ -30,7 +30,7 @@
 // both survive; a subscription billing twice for the identical amount is not.
 
 import { fuzzyVendorMatch } from '../vendors/formatVendorName';
-import { stepForward } from './recurrence';
+import { occurrenceAfter } from './recurrence';
 import { amountsAgree, daysApart, SAME_CHARGE_DAY_TOLERANCE } from './duplicateCharge';
 
 /**
@@ -113,11 +113,11 @@ export function scheduleLandsNear(
   // Only forward. A recurring row's date is where the series starts, so a
   // template dated after the capture has no earlier occurrences to offer —
   // and the anchor check above already covered "the template is right here".
-  let current = parseIsoDay(anchorIso);
-  if (!current) return false;
+  const anchor = parseIsoDay(anchorIso);
+  if (!anchor) return false;
 
-  for (let i = 0; i < MAX_OCCURRENCE_STEPS; i++) {
-    current = stepForward(current, rec);
+  for (let i = 1; i <= MAX_OCCURRENCE_STEPS; i++) {
+    const current = occurrenceAfter(anchor, rec, i);
     const gap = daysApart(toIsoDay(current), target);
     if (gap === null) return false;
     if (gap <= dayTolerance) return true;
